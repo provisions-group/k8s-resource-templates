@@ -1,0 +1,214 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: <APP_NAME>
+  namespace: <APP_NAMESPACE>
+  labels:
+    app: "<APP_NAME>"
+    component: "<COMPONENT>"
+    version: "<APP_VERSION>"
+    chart: "<CHART_NAME>"
+    release: "<RELEASE_NAME>"
+spec:
+  replicas: <REPLICA_COUNT>
+  selector:
+    matchLabels:
+      app: <APP_NAME>
+      version: "<APP_VERSION>"
+  strategy:
+    type: Recreate
+    type: RollingUpdate
+      rollingUpdate:
+        maxSurge: 25%
+        maxUnavailable: 25% 
+  template:
+    metadata:
+      labels:
+        app: <APP_NAME>
+      annotations:
+        "consul.hashicorp.com/connect-inject": "false"
+    spec:
+      hostAliases:
+      - ip: "127.0.0.1"
+        hostnames:
+        - "foo.local"
+        - "bar.local"
+      - ip: "10.1.2.3"
+        hostnames:
+        - "foo.remote"
+        - "bar.remote"    
+      tolerations:
+      - key: node-role.kubernetes.io/master
+        operator: Exists
+        effect: NoSchedule 
+      nodeSelector: 
+        diskType: ssd #or some other label on the node
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: kubernetes.io/e2e-az-name
+                operator: In
+                values:
+                - e2e-az1
+                - e2e-az2
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 1
+            preference:
+              matchExpressions:
+              - key: another-node-label-key
+                operator: In
+                values:
+                - another-node-label-value        
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: security
+                operator: In
+                values:
+                - S1
+            topologyKey: failure-domain.beta.kubernetes.io/zone
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: security
+                  operator: In
+                  values:
+                  - S2
+              topologyKey: failure-domain.beta.kubernetes.io/zone
+      initContainers:
+      ...
+      containers:
+      - name: "<CONATAINER_1_NAME"
+        image: "<CONTAINER_1_IMAGE>"
+        serviceAccountName: "<CONTAINER_SERVICE_ACCOUNT>"
+        restartPolicy: Always
+        lifecycle:
+          postStart:
+            exec:
+              command:
+              - command
+              - -flag
+              - flag-value
+          preStop:
+            httpGet:
+              port: 80
+              path: /shut-it-down
+        terminationGracePeriodSeconds: 10
+        resources:
+          requests:
+            cpu: 100m
+            memory: 100Mi
+          limits:
+            cpu: 200m
+            memory: 200Mi
+        serviceAccountName: <<SERVICE_ACCOUNT>>
+        securityContext:
+          runAsUser: 1000
+          runAsGroup: 3000        
+          fsGroup: 1000
+          readOnlyRootFilesystem: true
+          capabilities:
+            add:
+            - IPC_LOCK            
+        env:
+        - name: DEMO_FAREWELL
+          value: "Such a sweet sorrow"
+        - name: MY_POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: MY_CPU_REQUEST
+          valueFrom:
+            resourceFieldRef:
+              containerName: test-container
+              resource: requests.cpu
+        - name: APP_URL
+          valueFrom:
+            configMapKeyRef:
+              name: portal-config-map
+              key: APP_URL
+        - name: MAIL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: env-secrets
+              key: mail-password
+        command: ['<CONTAINER_1_COMMAND>']
+        args: ["<CONTAINER_1_COMMAND_ARGS"]
+        ports:
+        - name: http
+          containerPort: 80
+        protocol: TCP
+        livenessProbe:
+          httpGet:
+            path: /path/to/liveness
+            port: 80
+            scheme: http
+          initialDelaySeconds: 30
+          periodSeconds: 60
+        readinessProbe:
+          exec:
+            command: ["<COMMAND_FOR_READINESS>"]
+        volumeMounts:
+          - name: <NAME_OF_VOLUME>
+            mountPath: "/<DIR>"
+          securityContext:
+            allowPrivilegeEscalation: false
+  volumes:
+    - name: <NAME_OF_VOLUME>
+      emptyDir: {}
+      persistentVolumeClaim:
+        claimName: <NAME_OF_CLAIM>
+      secret:
+        secretName: mysecret    
+        items:
+        - key: username
+          path: my-group/my-username    
+      glusterfs:
+        endpoints: "glusterfs-cluster"
+        path: "kube_vol"
+        readOnly: true
+      awsElasticBlockStore:
+        volumeID: <VOLUME_ID>
+        fsType: ext4
+      azureFile: #https://github.com/kubernetes/examples/blob/master/staging/volumes/azure_file/README.md
+        secretName: azure-secret
+        shareName: k8stest
+        readOnly: false
+      azureDisk: #https://github.com/kubernetes/examples/tree/master/staging/volumes/azure_disk
+        diskName: test.vhd
+        diskURI: https://someaccount.blob.microsoft.net/vhds/test.vhd
+      azureDisk: #https://github.com/kubernetes/examples/blob/master/staging/volumes/azure_disk/static-provisioning/managed-disk/pod-uses-existing-managed-disk.yaml
+        kind: Managed
+        diskName: myDisk
+        diskURI: /subscriptions/<subscriptionID>/resourceGroups/<resourceGroup>/providers/Microsoft.Compute/disks/<diskName>
+        - name: podinfo
+      projected:
+        sources:
+          - serviceAccountToken:
+            path: vault-token
+            expirationSeconds: 7200
+            audience: vault
+          - downwardAPI:
+            items:
+              - path: "labels"
+                fieldRef:
+                  fieldPath: metadata.labels
+              - path: "annotations"
+                fieldRef:
+                  fieldPath: metadata.annotations
+          - configMap:
+            name: myconfigmap
+            items:
+              - key: config
+                path: my-group/my-config
+          - secret:
+            name: mysecret
+            items:
+              - key: username
+                path: my-group/my-username
